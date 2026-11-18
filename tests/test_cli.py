@@ -133,49 +133,41 @@ def test_empty_scan(make_bsf, tmp_path):
 
 
 # ------------------------------------------------------------------ mesh
-def test_mesh_ply(grid_bsf, tmp_path, capsys):
-    out = tmp_path / "m.ply"
-    assert main([str(grid_bsf), str(out), "--mesh", "--max-edge", "1", "--ascii"]) == 0
-    assert b"element face 2" in out.read_bytes()
-    assert "4 vertices, 2 triangles" in capsys.readouterr().out
+@pytest.fixture
+def sphere_bsf(make_bsf):
+    import math
+
+    rows = []
+    for e in range(40):
+        for d in range(60):
+            th, ph = math.pi * (e + 0.5) / 40, 2 * math.pi * d / 60
+            r = 5000
+            rows.append(
+                (
+                    10000 + round(r * math.sin(th) * math.cos(ph)),
+                    10000 + round(r * math.sin(th) * math.sin(ph)),
+                    10000 + round(r * math.cos(th)),
+                    d,
+                    e + 1,
+                    0,
+                )
+            )
+    return make_bsf(rows)
 
 
-def test_mesh_glb_per_head(grid_bsf, tmp_path):
-    out = tmp_path / "m.glb"
-    main([str(grid_bsf), str(out), "--mesh", "--max-edge", "1"])
-    data = out.read_bytes()
-    assert b"head_0" in data
-    assert b'"mode":4' in data
+@pytest.mark.parametrize("ext", ["ply", "glb"])
+def test_mesh_sphere(sphere_bsf, tmp_path, capsys, ext):
+    pytest.importorskip("open3d")
+    out = tmp_path / f"m.{ext}"
+    assert main([str(sphere_bsf), str(out), "--mesh", "--voxel", "0.02", "--depth", "6"]) == 0
+    stdout = capsys.readouterr().out
+    assert "triangles" in stdout
+    assert out.read_bytes().startswith(b"ply\n" if ext == "ply" else b"glTF")
 
 
-def test_mesh_glb_merged(grid_bsf, tmp_path):
-    out = tmp_path / "m.glb"
-    main([str(grid_bsf), str(out), "--mesh", "--max-edge", "1", "--merge-heads"])
-    assert b'"mesh"' in out.read_bytes()
+def test_mesh_without_open3d(sphere_bsf, tmp_path, monkeypatch):
+    import sys
 
-
-def test_mesh_multiple_heads_merge_offsets(make_bsf, tmp_path):
-    rows = [
-        (1000 + d, 2000, 3000 + 36 * e, d, e + 1, w)
-        for w in (0, 1)
-        for e in range(2)
-        for d in range(2)
-    ]
-    out = tmp_path / "m.ply"
-    main([str(make_bsf(rows)), str(out), "--mesh", "--max-edge", "1", "--ascii"])
-    lines = out.read_text(encoding="ascii").splitlines()
-    assert "element vertex 8" in lines
-    assert "element face 4" in lines
-    faces = [list(map(int, ln.split()[1:])) for ln in lines if ln.startswith("3 ")]
-    assert all(0 <= i < 8 for f in faces for i in f)
-    assert any(i >= 4 for f in faces for i in f)  # second head's indices are offset
-
-
-def test_mesh_too_small_max_edge(grid_bsf, tmp_path):
-    with pytest.raises(SystemExit, match="mesh is empty"):
-        main([str(grid_bsf), str(tmp_path / "m.ply"), "--mesh", "--max-edge", "0.0000001"])
-
-
-def test_mesh_with_stride_rejected(grid_bsf, tmp_path):
-    with pytest.raises(SystemExit, match="stride"):
-        main([str(grid_bsf), str(tmp_path / "m.ply"), "--mesh", "--stride", "2"])
+    monkeypatch.setitem(sys.modules, "open3d", None)
+    with pytest.raises(SystemExit, match="Open3D"):
+        main([str(sphere_bsf), str(tmp_path / "m.ply"), "--mesh"])

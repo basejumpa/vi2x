@@ -47,8 +47,10 @@ The output format is chosen by the file extension.
 | `--heads 1,2`                      | all      | Keep only points of these head/pass ids (field `w`, 0–7).                                                                                                                                         |
 | `--stride N`                       | `1`      | Keep every Nth point (decimation).                                                                                                                                                                |
 | `--merge-heads`                    | off      | GLB only: put all heads into a single mesh. By default every head becomes its own node and mesh named `head_<id>`, so heads can be shown/hidden separately in a viewer.                           |
-| `--mesh`                           | off      | Write a triangle mesh instead of a point cloud (triangulates the scan grid of each head). Not combinable with `--stride`.                                                                         |
-| `--max-edge M`                     | `0.01`   | With `--mesh`: drop triangles with an edge longer than M metres. Larger = fewer holes but bridges across gaps.                                                                                    |
+| `--mesh` | off | Write one fused triangle mesh instead of a point cloud: Poisson surface reconstruction (Open3D) over all heads together. Needs the `mesh` extra. |
+| `--voxel M` | `0.003` | With `--mesh`: thin the cloud to one point per cube of M metres (0 = no thinning). |
+| `--depth N` | `9` | With `--mesh`: Poisson octree depth. Higher = finer detail, more memory and time. |
+| `--trim F` | `0.05` | With `--mesh`: remove this fraction (0..1) of the least supported vertices, i.e. surface invented over gaps. |
 | `--ascii`                          | off      | Write ASCII PLY instead of binary little-endian.                                                                                                                                                  |
 | `--version`                        | –        | Print the version.                                                                                                                                                                                |
 
@@ -77,22 +79,28 @@ vi2x out.csf out.glb --mesh
 
 ### Mesh output
 
-`--mesh` turns the scan into triangles. Every head is a range image: its points sit on a grid
-of scan line `e` and pixel column `d`. Neighbouring grid cells are joined into two triangles
-(split along the shorter diagonal), or one triangle if only three corners exist. Triangles with
-an edge longer than `--max-edge` are dropped, so gaps and depth jumps at silhouettes are not
-bridged. Points that end up in no triangle are not written.
+`--mesh` needs [Open3D](https://www.open3d.org/), which is an optional extra:
 
-- **PLY:** one vertex list and a `vertex_indices` face list for all heads together.
-- **GLB:** one TRIANGLES mesh per head (`head_<id>`, `--merge-heads` for a single mesh), with a
-  neutral double-sided material. There are no normals; viewers compute flat shading.
-- The heads overlap, so the surface is several partly overlapping patches, not one watertight
-  mesh, and the mesh is not welded between heads. For `out.csf` with defaults: 415,425 vertices
-  and 801,832 triangles in about 10 s.
-- A smaller `--max-edge` gives more holes, a larger one bridges more gaps. The curtain sheet
-  (head 1) is meshed too; use `--heads` to leave it out.
-- Triangle winding is consistent within a head, but which side is "front" depends on `--up`/`--view`;
-  that is why the GLB material is double sided.
+```
+uv tool install "vi2x[mesh] @ git+https://github.com/basejumpa/vi2x"   # or: uv sync --extra mesh
+```
+
+All heads are fused into **one** surface, so the result is a single mesh and not overlapping
+patches per head:
+
+1. The points are thinned to one per `--voxel` cube.
+2. Normals are estimated, made consistent over the cloud and pointed away from the body axis.
+3. Poisson surface reconstruction (`--depth`) builds the surface.
+4. The `--trim` fraction of the least supported vertices is cut away (surface invented over
+   gaps and scan borders), degenerate and non-manifold triangles are removed, and floating
+   pieces much smaller than the main body are dropped.
+
+For `out.csf` with `--heads 0,2,3,4,5,6,7` this takes about 30 s and gives about 200,000
+vertices and 400,000 triangles as a single connected, edge-manifold piece. Use `--heads` to
+leave out the curtain sheet (head 1). `--stride` thins the cloud before meshing. GLB output
+has one mesh named `mesh`; `--merge-heads` does not apply to meshes. The surface is smooth
+and may be slightly closed up at thin gaps; raise `--depth` or lower `--voxel` for more
+detail.
 
 ### How to remove specific heads
 

@@ -7,7 +7,8 @@ import sys
 from collections.abc import Sequence
 
 from vi2x import __version__
-from vi2x.geometry import build_mesh, parse_axes, transform
+from vi2x.geometry import parse_axes, transform
+from vi2x.meshing import poisson_mesh
 from vi2x.readers import read_scan
 from vi2x.writers import write_glb, write_ply
 
@@ -49,35 +50,39 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--merge-heads",
         action="store_true",
-        help="GLB only: put all heads into one mesh (default: one node/mesh 'head_<id>' per head)",
+        help="GLB point cloud only: put all heads into one mesh (default: one node 'head_<id>' per head)",
     )
     ap.add_argument(
         "--mesh",
         action="store_true",
-        help="write a triangle mesh instead of a point cloud (triangulates the scan "
-        "grid of each head; not combinable with --stride)",
+        help="write one fused triangle mesh instead of a point cloud (Poisson surface "
+        "reconstruction of all heads together; needs the Open3D extra)",
     )
     ap.add_argument(
-        "--max-edge",
+        "--voxel",
         type=float,
-        default=0.01,
+        default=0.003,
         metavar="M",
-        help="with --mesh: drop triangles with an edge longer than this many metres "
-        "(default 0.01). Larger = fewer holes but bridges across gaps.",
+        help="with --mesh: thin the cloud to one point per cube of this many metres "
+        "(default 0.003; 0 = no thinning)",
+    )
+    ap.add_argument(
+        "--depth",
+        type=int,
+        default=9,
+        help="with --mesh: Poisson octree depth (default 9). Higher = finer detail, more memory.",
+    )
+    ap.add_argument(
+        "--trim",
+        type=float,
+        default=0.05,
+        metavar="F",
+        help="with --mesh: remove this fraction (0..1) of the least supported vertices, "
+        "i.e. surface invented over gaps (default 0.05)",
     )
     ap.add_argument("--ascii", action="store_true", help="write ASCII PLY instead of binary")
     ap.add_argument("--stride", type=int, default=1, help="keep every Nth point (decimation)")
     return ap
-
-
-def _merge(meshes):
-    verts, faces, off = [], [], 0
-    for w in sorted(meshes):
-        v, f = meshes[w]
-        verts += v
-        faces += [(i + off, j + off, k + off) for i, j, k in f]
-        off += len(v)
-    return verts, faces
 
 
 def _join_axis_values(argv: Sequence[str] | None) -> list[str]:
@@ -100,44 +105,34 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit("output extension must be .ply or .glb")
     heads = {int(h) for h in a.heads.split(",")} if a.heads else None
 
-    if a.mesh and a.stride > 1:
-        raise SystemExit("--mesh cannot be combined with --stride")
-    pts, ws, ed = read_scan(a.input, heads)
+    pts, ws, _ = read_scan(a.input, heads)
     if a.stride > 1:
         pts, ws = pts[:: a.stride], ws[:: a.stride]
     if not pts:
         raise SystemExit("no points")
     pts = transform(pts, a.scale, parse_axes(a.up, a.view))
-    by: dict[int, list[int]] = {}
-    for i, w in enumerate(ws):
-        by.setdefault(w, []).append(i)
     ntri = 0
     if a.mesh:
-        # --max-edge is in metres (1 m = 10000 raw units); output units are raw * scale
-        max_edge = a.max_edge * 10000 * a.scale
-        meshes = {w: build_mesh(pts, ed, by[w], max_edge) for w in sorted(by)}
-        ntri = sum(len(f) for _, f in meshes.values())
+        # --voxel is in metres (1 m = 10000 raw units); output units are raw * scale
+        verts, faces = poisson_mesh(pts, a.voxel * 10000 * a.scale, a.depth, a.trim)
+        ntri = len(faces)
         if ntri == 0:
-            raise SystemExit("mesh is empty; try a larger --max-edge")
-        if ext == "ply" or a.merge_heads:
-            verts, faces = _merge(meshes)
-            if ext == "ply":
-                write_ply(a.output, verts, a.ascii, faces)
-            else:
-                write_glb(a.output, [("mesh", verts, faces)])
-            pts = verts
+            raise SystemExit("mesh is empty; try a smaller --trim or --voxel")
+        if ext == "ply":
+            write_ply(a.output, verts, a.ascii, faces)
         else:
-            write_glb(
-                a.output,
-                [(f"head_{w}",) + meshes[w] for w in sorted(meshes) if meshes[w][1]],
-            )
-            pts = [p for m in meshes.values() for p in m[0]]
+            write_glb(a.output, [("mesh", verts, faces)])
+        pts = verts
     elif ext == "ply":
         write_ply(a.output, pts, a.ascii)
-    elif a.merge_heads:
-        write_glb(a.output, [("points", pts, None)])
     else:
-        write_glb(a.output, [(f"head_{w}", [pts[i] for i in by[w]], None) for w in sorted(by)])
+        by: dict[int, list[int]] = {}
+        for i, w in enumerate(ws):
+            by.setdefault(w, []).append(i)
+        if a.merge_heads:
+            write_glb(a.output, [("points", pts, None)])
+        else:
+            write_glb(a.output, [(f"head_{w}", [pts[i] for i in by[w]], None) for w in sorted(by)])
     mins = [min(p[k] for p in pts) for k in range(3)]
     maxs = [max(p[k] for p in pts) for k in range(3)]
     if a.mesh:

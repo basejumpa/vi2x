@@ -1,4 +1,4 @@
-"""Coordinate transformation and meshing."""
+"""Coordinate transformation."""
 
 from __future__ import annotations
 
@@ -52,46 +52,3 @@ def transform(pts, scale: float, axes) -> list[Point]:
         ]
         out = [(p[0] - off[0], p[1] - off[1], p[2] - off[2]) for p in out]
     return out
-
-def build_mesh(pts, ed, idxs, max_edge: float):
-    """Triangulate one head.
-
-    Each head is a range image: points are arranged on a grid of scan line e and pixel
-    column d. Neighbouring grid cells are joined into triangles; triangles with an edge
-    longer than `max_edge` (in output units) are dropped, so gaps and depth jumps
-    (silhouettes) are not bridged.
-    Returns (vertices, faces) with only the used vertices and faces indexing into them.
-    """
-    grid = {ed[i]: i for i in idxs}
-    me2 = max_edge * max_edge
-    faces: list[tuple[int, int, int]] = []
-
-    def d2(i, j):
-        p, q = pts[i], pts[j]
-        return (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2 + (p[2] - q[2]) ** 2
-
-    def tri(i, j, k):
-        if d2(i, j) <= me2 and d2(j, k) <= me2 and d2(k, i) <= me2:
-            faces.append((i, j, k))
-
-    get = grid.get
-    for (e, d), a in grid.items():
-        b = get((e, d + 1))
-        c = get((e + 1, d + 1))
-        q = get((e + 1, d))
-        if b is not None and c is not None and q is not None:
-            if d2(a, c) <= d2(b, q):  # split along the shorter diagonal
-                tri(a, b, c)
-                tri(a, c, q)
-            else:
-                tri(a, b, q)
-                tri(b, c, q)
-        elif b is not None and c is not None:
-            tri(a, b, c)
-        elif b is not None and q is not None:
-            tri(a, b, q)
-        elif c is not None and q is not None:
-            tri(a, c, q)
-    used = sorted({v for f in faces for v in f})
-    remap = {v: n for n, v in enumerate(used)}
-    return [pts[v] for v in used], [(remap[i], remap[j], remap[k]) for i, j, k in faces]

@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from vi2x.geometry import build_mesh, parse_axes, transform
+from vi2x.geometry import parse_axes, transform
 
 RAW_AXES = parse_axes("z", "-y")  # identity mapping
 
@@ -62,57 +62,3 @@ def test_origin_is_centre_of_lowest_slice():
     assert out[0] == pytest.approx((-2, -2, 0))
     assert out[1] == pytest.approx((2, 2, 0))
     assert out[2] == pytest.approx((46, 48, 100))
-
-
-# ------------------------------------------------------------------ meshing
-def _quad(extra=None):
-    """Unit grid; point index = 2 * e + d."""
-    pts = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (1.0, 1.0, 0.0)]
-    ed = [(0, 0), (0, 1), (1, 0), (1, 1)]
-    return pts, ed
-
-
-def test_mesh_full_cell_gives_two_triangles():
-    pts, ed = _quad()
-    verts, faces = build_mesh(pts, ed, range(4), max_edge=10)
-    assert len(verts) == 4
-    assert len(faces) == 2
-    assert {v for f in faces for v in f} == {0, 1, 2, 3}
-
-
-def test_mesh_picks_shorter_diagonal():
-    pts, ed = _quad()
-    pts[3] = (1.0, 1.0, 5.0)  # a-c diagonal is now long, b-q is shorter
-    _, faces = build_mesh(pts, ed, range(4), max_edge=100)
-    edges = {frozenset(e) for f in faces for e in ((f[0], f[1]), (f[1], f[2]), (f[2], f[0]))}
-    assert frozenset((1, 2)) in edges
-    assert frozenset((0, 3)) not in edges
-
-
-def test_mesh_drops_long_edges():
-    pts, ed = _quad()
-    verts, faces = build_mesh(pts, ed, range(4), max_edge=0.5)
-    assert verts == []
-    assert faces == []
-
-
-def test_mesh_missing_corner_gives_one_triangle():
-    pts, ed = _quad()
-    verts, faces = build_mesh(pts, ed, [0, 1, 2], max_edge=10)  # no (1, 1)
-    assert len(faces) == 1
-    assert len(verts) == 3
-
-
-def test_mesh_disconnected_points_have_no_faces():
-    pts = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)]
-    ed = [(0, 0), (5, 5)]
-    assert build_mesh(pts, ed, [0, 1], max_edge=10) == ([], [])
-
-
-def test_mesh_indices_are_remapped_to_used_vertices():
-    # unused point 0 is outside the cell; indices must refer to the returned vertex list
-    pts = [(9.0, 9.0, 9.0), (0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)]
-    ed = [(100, 100), (0, 0), (0, 1), (1, 0)]
-    verts, faces = build_mesh(pts, ed, range(4), max_edge=10)
-    assert (9.0, 9.0, 9.0) not in verts
-    assert all(0 <= i < len(verts) for f in faces for i in f)
