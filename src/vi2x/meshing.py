@@ -13,9 +13,11 @@ MIN_PIECE = 0.05  # keep connected pieces with at least this fraction of the lar
 def _open3d():
     try:
         import open3d as o3d
-    except ImportError:
+    except ImportError as exc:
         raise SystemExit(
-            "--mesh needs Open3D; install it with: pip install 'vi2x[mesh]' (uv sync --extra mesh)"
+            f"--mesh needs a working Open3D ({exc}). Install it with: "
+            "pip install 'vi2x[mesh]' (uv sync --extra mesh). On Linux it also needs the system "
+            "libraries libegl1, libgl1 and libgomp1."
         ) from None
     return o3d
 

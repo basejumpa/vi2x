@@ -85,6 +85,8 @@ vi2x out.csf out.glb --mesh
 uv tool install "vi2x[mesh] @ git+https://github.com/basejumpa/vi2x"   # or: uv sync --extra mesh
 ```
 
+On Linux, Open3D also needs the system libraries `libegl1`, `libgl1` and `libgomp1`\n(`sudo apt-get install libegl1 libgl1 libgomp1`).
+
 All heads are fused into **one** surface, so the result is a single mesh and not overlapping
 patches per head:
 
