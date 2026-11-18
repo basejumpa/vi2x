@@ -31,13 +31,15 @@ def parse_axes(up: str, view: str) -> list[tuple[int, float]]:
     xs = us * vs * cyc
     return [(xi, float(xs)), (vi, float(-vs)), (ui, float(us))]
 
+
 FLOOR_SLICE = 0.02  # fraction of the height that counts as "lowest" for the origin
 
 
 def transform(pts, scale: float, axes) -> list[Point]:
     """Remap axes, scale, then move the origin to the lowest centre point.
 
-    The origin ends up at the centre of the lowest slice (the feet) in X/Y and at the minimum\n    in Z.
+    The origin ends up at the centre of the lowest slice (the feet) in X/Y and at the minimum
+    in Z.
     """
     out = [tuple(sg * p[src] * scale for src, sg in axes) for p in pts]
     if out:

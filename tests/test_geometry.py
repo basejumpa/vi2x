@@ -1,5 +1,3 @@
-import math
-
 import pytest
 
 from vi2x.geometry import parse_axes, transform
@@ -40,6 +38,7 @@ def test_parse_axes_maps_up_and_view(up, view):
     out_view = tuple(sg * vec(view)[src] for src, sg in axes)
     assert out_up == (0, 0, 1)
     assert out_view == (0, -1, 0)
+
 
 def test_transform_scale_and_axes():
     out = transform([(0, 0, 0), (10, 20, 30)], 0.1, parse_axes("y", "z"))

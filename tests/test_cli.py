@@ -69,6 +69,7 @@ def test_default_up_is_input_y_output_z(grid_bsf, tmp_path, capsys):
     # default up=y: raw y span becomes the Z extent, starting at 0
     assert "Z 0.000.." in stdout
 
+
 def test_heads_filter(csf, tmp_path, capsys):
     main([str(csf), str(tmp_path / "o.ply"), "--heads", "1"])
     assert "2 points" in capsys.readouterr().out
@@ -109,6 +110,7 @@ def test_ascii_ply(grid_bsf, tmp_path):
 def test_bad_up_view(grid_bsf, tmp_path):
     with pytest.raises(SystemExit):
         main([str(grid_bsf), str(tmp_path / "o.ply"), "--up", "x", "--view", "-x"])
+
 
 def test_bad_extension(grid_bsf, tmp_path):
     with pytest.raises(SystemExit, match="extension"):

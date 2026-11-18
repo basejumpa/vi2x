@@ -50,7 +50,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--merge-heads",
         action="store_true",
-        help="GLB point cloud only: put all heads into one mesh (default: one node 'head_<id>' per head)",
+        help="GLB point cloud only: put all heads into one mesh "
+        "(default: one node 'head_<id>' per head)",
     )
     ap.add_argument(
         "--mesh",
