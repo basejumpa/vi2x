@@ -56,19 +56,18 @@ def test_extension_is_case_insensitive(grid_bsf, tmp_path):
 
 def test_summary_output_and_extent(grid_bsf, tmp_path, capsys):
     out = tmp_path / "o.ply"
-    main([str(grid_bsf), str(out), "--axes", "x,y,z", "--scale", "1", "--no-center"])
+    main([str(grid_bsf), str(out), "--up", "z", "--view", "-y", "--scale", "1"])
     stdout = capsys.readouterr().out
     assert "4 points" in stdout
-    assert "X 1000.000..1001.000" in stdout
-    assert "Z 3000.000..3036.000" in stdout
+    assert "X -0.500..0.500" in stdout
+    assert "Z 0.000..36.000" in stdout
 
 
-def test_default_axes_stand_person_along_y(grid_bsf, tmp_path, capsys):
+def test_default_up_is_input_y_output_z(grid_bsf, tmp_path, capsys):
     main([str(grid_bsf), str(tmp_path / "o.ply")])
     stdout = capsys.readouterr().out
-    # raw z span 36 units = 3.6 mm becomes the Y extent, floor-centred (min 0)
-    assert "Y 0.000..0.004" in stdout
-
+    # default up=y: raw y span becomes the Z extent, starting at 0
+    assert "Z 0.000.." in stdout
 
 def test_heads_filter(csf, tmp_path, capsys):
     main([str(csf), str(tmp_path / "o.ply"), "--heads", "1"])
@@ -107,31 +106,9 @@ def test_ascii_ply(grid_bsf, tmp_path):
     assert b"format ascii 1.0" in out.read_bytes()
 
 
-def test_center_modes_accepted(grid_bsf, tmp_path):
-    for mode in ("none", "bbox", "mean", "floor"):
-        assert main([str(grid_bsf), str(tmp_path / "o.ply"), "--center", mode]) == 0
-
-
-def test_rotate_changes_extent(grid_bsf, tmp_path, capsys):
-    args = [str(grid_bsf), str(tmp_path / "o.ply"), "--axes", "x,y,z", "--scale", "1"]
-    main(args + ["--no-center"])
-    plain = capsys.readouterr().out
-    main(args + ["--no-center", "--rotate", "0,0,180"])
-    rotated = capsys.readouterr().out
-    assert "X 1000.000..1001.000" in plain
-    assert "X -1001.000..-1000.000" in rotated
-
-
-@pytest.mark.parametrize("rotate", ["1,2", "a,b,c", "1,2,3,4", ""])
-def test_bad_rotate(grid_bsf, tmp_path, rotate):
-    with pytest.raises(SystemExit, match="--rotate"):
-        main([str(grid_bsf), str(tmp_path / "o.ply"), "--rotate", rotate])
-
-
-def test_bad_axes(grid_bsf, tmp_path):
+def test_bad_up_view(grid_bsf, tmp_path):
     with pytest.raises(SystemExit):
-        main([str(grid_bsf), str(tmp_path / "o.ply"), "--axes", "x,x,y"])
-
+        main([str(grid_bsf), str(tmp_path / "o.ply"), "--up", "x", "--view", "-x"])
 
 def test_bad_extension(grid_bsf, tmp_path):
     with pytest.raises(SystemExit, match="extension"):

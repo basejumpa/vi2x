@@ -2,69 +2,56 @@
 
 from __future__ import annotations
 
-import math
-
 Point = tuple[float, float, float]
-Matrix = list[list[float]]
 
 
-def parse_axes(spec: str) -> list[tuple[int, float]]:
-    """'x,-z,y' -> [(src_index, sign), ...]: output axis k takes sign*input[src]."""
-    parts = [p.strip().lower() for p in spec.split(",")]
-    if len(parts) != 3:
-        raise SystemExit("--axes needs three comma separated entries, e.g. x,-z,y")
-    res = []
-    for p in parts:
-        sign = -1.0 if p.startswith("-") else 1.0
-        p = p.lstrip("+-")
-        if p not in ("x", "y", "z"):
-            raise SystemExit(f"bad axis {p!r} in --axes")
-        res.append(("xyz".index(p), sign))
-    if len({s for s, _ in res}) != 3:
-        raise SystemExit("--axes must use each of x, y, z exactly once")
-    return res
+def _parse_axis(spec: str, opt: str) -> tuple[int, int]:
+    """'-y' -> (1, -1): source axis index and sign."""
+    s = spec.strip().lower()
+    sign = -1 if s.startswith("-") else 1
+    s = s.lstrip("+-")
+    if s not in ("x", "y", "z"):
+        raise SystemExit(f"{opt} needs one of x, y, z with optional sign, e.g. -y; got {spec!r}")
+    return "xyz".index(s), sign
 
 
-def rot_matrix(rx: float, ry: float, rz: float) -> Matrix:
-    """Rotation about X, then Y, then Z (degrees), as 3x3 row matrix."""
-    rx, ry, rz = (math.radians(a) for a in (rx, ry, rz))
-    cx, sx = math.cos(rx), math.sin(rx)
-    cy, sy = math.cos(ry), math.sin(ry)
-    cz, sz = math.cos(rz), math.sin(rz)
-    mx = [[1, 0, 0], [0, cx, -sx], [0, sx, cx]]
-    my = [[cy, 0, sy], [0, 1, 0], [-sy, 0, cy]]
-    mz = [[cz, -sz, 0], [sz, cz, 0], [0, 0, 1]]
+def parse_axes(up: str, view: str) -> list[tuple[int, float]]:
+    """Input axes 'up' and 'view' (towards the viewer) -> axis mapping.
 
-    def mul(a, b):
-        return [[sum(a[i][k] * b[k][j] for k in range(3)) for j in range(3)] for i in range(3)]
+    The output always has up = +Z and view = -Y, so X = up x view (right-handed).
+    Returns [(src_index, sign), ...]: output axis k takes sign*input[src].
+    """
+    ui, us = _parse_axis(up, "--up")
+    vi, vs = _parse_axis(view, "--view")
+    if ui == vi:
+        raise SystemExit("--up and --view must be different axes")
+    xi = 3 - ui - vi  # the remaining axis
+    # sign of the remaining axis so that x = up x view: e_u x e_v = +/- e_x (cyclic parity)
+    cyc = 1 if (vi - ui) % 3 == 1 else -1
+    xs = us * vs * cyc
+    return [(xi, float(xs)), (vi, float(-vs)), (ui, float(us))]
 
-    return mul(mz, mul(my, mx))
+FLOOR_SLICE = 0.02  # fraction of the height that counts as "lowest" for the origin
 
 
-def transform(pts, scale: float, axes, rot: Matrix, center: str) -> list[Point]:
-    m = rot
-    out = []
-    for p in pts:
-        v = [axes[k][1] * p[axes[k][0]] * scale for k in range(3)]
-        out.append(
-            (
-                m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
-                m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
-                m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2],
-            )
-        )
-    if center != "none" and out:
-        mins = [min(p[k] for p in out) for k in range(3)]
-        maxs = [max(p[k] for p in out) for k in range(3)]
-        if center == "bbox":
-            off = [(mins[k] + maxs[k]) / 2 for k in range(3)]
-        elif center == "floor":  # centre x/z, put lowest point (min along 2nd axis) at 0
-            off = [(mins[0] + maxs[0]) / 2, mins[1], (mins[2] + maxs[2]) / 2]
-        else:  # mean
-            off = [sum(p[k] for p in out) / len(out) for k in range(3)]
+def transform(pts, scale: float, axes) -> list[Point]:
+    """Remap axes, scale, then move the origin to the lowest centre point.
+
+    The origin ends up at the centre of the lowest slice (the feet) in X/Y and at the minimum\n    in Z.
+    """
+    out = [tuple(sg * p[src] * scale for src, sg in axes) for p in pts]
+    if out:
+        zmin = min(p[2] for p in out)
+        zmax = max(p[2] for p in out)
+        # the lowest slice (feet): points within FLOOR_SLICE of the height above the minimum
+        low = [p for p in out if p[2] <= zmin + FLOOR_SLICE * (zmax - zmin)]
+        off = [
+            (min(p[0] for p in low) + max(p[0] for p in low)) / 2,
+            (min(p[1] for p in low) + max(p[1] for p in low)) / 2,
+            zmin,
+        ]
         out = [(p[0] - off[0], p[1] - off[1], p[2] - off[2]) for p in out]
     return out
-
 
 def build_mesh(pts, ed, idxs, max_edge: float):
     """Triangulate one head.

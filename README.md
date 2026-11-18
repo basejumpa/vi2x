@@ -3,7 +3,7 @@
 `vi2x` reads a `.csf` or `.bsf` file (the type is detected from the magic bytes;
 3D body-scanner point cloud, header strings `HUMAN SOLUTIONS` / `XX-SMART_XX`, i.e.
 Vitronic VITUS Smart XX) and writes a point cloud or triangle mesh as **PLY** or **GLB**
-with user-defined scaling, axis mapping and rotation.
+with user-defined scaling and axis mapping.
 
 - Python 3.10+, standard library only (no numpy needed)
 - Tested on `out.csf` (430,169 points, 1.761 m tall person with default settings)
@@ -42,10 +42,8 @@ The output format is chosen by the file extension.
 | Option                             | Default  | Meaning                                                                                                                                                                                           |
 |------------------------------------|----------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `--scale F` (alias `--unit-scale`) | `0.0001` | Multiplier for the raw values. Raw unit is assumed to be 0.1 mm, so the default gives metres. Use `0.1` for mm, `1` for raw units.                                                                |
-| `--axes a,b,c`                     | `x,-z,y` | Which source axis becomes output X, Y, Z, with optional `-` to flip. Each of x, y, z must appear once. The default makes the person stand along +Y (glTF convention). `x,y,z` keeps the raw axes. |
-| `--rotate RX,RY,RZ`                | `0,0,0`  | Additional rotation in degrees about the *output* X, Y, Z axes, applied in that order (X, then Y, then Z).                                                                                        |
-| `--center MODE`                    | `floor`  | `floor`: centre X/Z, lowest point on Y at 0. `bbox`: centre bounding box. `mean`: centre on average point. `none`: no translation.                                                                |
-| `--no-center`                      | –        | Same as `--center none`.                                                                                                                                                                          |
+| `--up AXIS` | `-z` | Input axis that points up (`x`, `y` or `z`, optional sign). Raw z increases towards the feet, hence the default `-z`. |
+| `--view AXIS` | `x` | Input axis that points towards the viewer who looks at the screen (e.g. `-y`). |
 | `--heads 1,2`                      | all      | Keep only points of these head/pass ids (field `w`, 0–7).                                                                                                                                         |
 | `--stride N`                       | `1`      | Keep every Nth point (decimation).                                                                                                                                                                |
 | `--merge-heads`                    | off      | GLB only: put all heads into a single mesh. By default every head becomes its own node and mesh named `head_<id>`, so heads can be shown/hidden separately in a viewer.                           |
@@ -54,7 +52,9 @@ The output format is chosen by the file extension.
 | `--ascii`                          | off      | Write ASCII PLY instead of binary little-endian.                                                                                                                                                  |
 | `--version`                        | –        | Print the version.                                                                                                                                                                                |
 
-Order of operations: axis remap/flip → scale → rotation → centering.
+The output always has **up = +Z** and **view (towards the viewer) = -Y**, so X points to the viewer's right. The origin is moved to the lowest centre point: centre of the lowest slice (the lowest 2 % of the height, i.e. the feet) in X/Y, minimum at Z = 0.
+
+Order of operations: axis remap → scale → origin shift.
 
 ### Examples
 
@@ -62,11 +62,11 @@ Order of operations: axis remap/flip → scale → rotation → centering.
 # metres, upright, feet on the floor (defaults)
 vi2x out.csf out.ply
 
-# GLB, person turned around by 180° about the vertical axis
-vi2x out.csf out.glb --rotate 0,180,0
+# GLB, with the viewer on the opposite side (person turned around)
+vi2x out.csf out.glb --view -x
 
-# raw axes and raw units, no translation, small ASCII file for inspection
-vi2x out.csf test.ply --axes x,y,z --scale 1 --no-center --ascii --stride 100
+# input with up = -z and the viewer on the +x side, raw units, small ASCII file
+vi2x out.csf test.ply --up=-z --view x --scale 1 --ascii --stride 100
 
 # millimetres
 vi2x out.csf out_mm.ply --scale 0.1
@@ -91,7 +91,7 @@ bridged. Points that end up in no triangle are not written.
   and 801,832 triangles in about 10 s.
 - A smaller `--max-edge` gives more holes, a larger one bridges more gaps. The curtain sheet
   (head 1) is meshed too; use `--heads` to leave it out.
-- Triangle winding is consistent within a head, but which side is "front" depends on `--axes`;
+- Triangle winding is consistent within a head, but which side is "front" depends on `--up`/`--view`;
   that is why the GLB material is double sided.
 
 ### How to remove specific heads
@@ -127,11 +127,8 @@ inspection step. The `--heads` filter itself works with either output format.
 
 ### Orientation hints
 
-The facing direction after the default mapping is unverified. If the person
-looks away from you in your viewer, add `--rotate 0,180,0`. If the person lies
-down or is mirrored, change `--axes` (e.g. `x,z,y`, `-x,-z,y`).
-In the raw data **z increases towards the feet**, which is why the default
-uses `-z` as the vertical axis.
+Tell vi2x which input axes are up and towards the viewer with `--up` and `--view`; the output is always up = +Z, view = -Y. If the person looks away from you in your viewer, flip `--view` (e.g. `--view -x`).
+In the raw data **z increases towards the feet**, so a raw-axes scan has `--up=-z`. Write negative axes as `--up=-z`.
 
 ### Output
 
@@ -139,7 +136,7 @@ uses `-z` as the vertical axis.
   (see [Mesh output](#mesh-output)).
 - **GLB**: glTF 2.0. Point clouds use one primitive of mode 0 (POINTS) per mesh, with
   `POSITION` as float32 VEC3 with min/max set; `--mesh` uses TRIANGLES with indices and a
-  double-sided material. Y-up, metres by default.
+  double-sided material. Z-up, metres by default.
 
 Not supported: colours, normals.
 

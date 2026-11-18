@@ -2,93 +2,66 @@ import math
 
 import pytest
 
-from vi2x.geometry import build_mesh, parse_axes, rot_matrix, transform
+from vi2x.geometry import build_mesh, parse_axes, transform
 
-IDENTITY = rot_matrix(0, 0, 0)
-RAW_AXES = parse_axes("x,y,z")
+RAW_AXES = parse_axes("z", "-y")  # identity mapping
 
 
 def test_parse_axes_default():
-    assert parse_axes("x,-z,y") == [(0, 1.0), (2, -1.0), (1, 1.0)]
+    assert parse_axes("y", "z") == [(0, 1.0), (2, -1.0), (1, 1.0)]
+
+
+def test_parse_axes_already_output_convention():
+    assert parse_axes("z", "-y") == RAW_AXES
 
 
 def test_parse_axes_whitespace_case_plus():
-    assert parse_axes(" X , +Y , -Z ") == [(0, 1.0), (1, 1.0), (2, -1.0)]
+    assert parse_axes(" Z ", " +X ") == [(1, 1.0), (0, -1.0), (2, 1.0)]
 
 
-@pytest.mark.parametrize("spec", ["x,y", "x,y,z,x", "x,y,q", "x,x,y", "x,-x,y", ""])
-def test_parse_axes_invalid(spec):
+@pytest.mark.parametrize("up,view", [("x", "x"), ("y", "-y"), ("q", "z"), ("y", ""), ("", "z")])
+def test_parse_axes_invalid(up, view):
     with pytest.raises(SystemExit):
-        parse_axes(spec)
+        parse_axes(up, view)
 
 
-def test_identity_rotation():
-    for row, expected in zip(IDENTITY, [[1, 0, 0], [0, 1, 0], [0, 0, 1]], strict=True):
-        assert row == pytest.approx(expected)
+@pytest.mark.parametrize("up", ["x", "-x", "y", "-y", "z", "-z"])
+@pytest.mark.parametrize("view", ["x", "-x", "y", "-y", "z", "-z"])
+def test_parse_axes_maps_up_and_view(up, view):
+    if up.lstrip("-") == view.lstrip("-"):
+        return
+    axes = parse_axes(up, view)
+    unit = {"x": (1, 0, 0), "y": (0, 1, 0), "z": (0, 0, 1)}
 
+    def vec(s):
+        return tuple((-1 if s[0] == "-" else 1) * c for c in unit[s.lstrip("-")])
 
-def test_rotation_z_90_maps_x_to_y():
-    m = rot_matrix(0, 0, 90)
-    assert [sum(m[i][k] * v for k, v in enumerate((1, 0, 0))) for i in range(3)] == pytest.approx(
-        [0, 1, 0]
-    )
-
-
-def test_rotation_order_is_x_then_y_then_z():
-    m = rot_matrix(90, 90, 0)
-    # x-axis: Rx leaves it, Ry(90) sends it to -z
-    assert [m[i][0] for i in range(3)] == pytest.approx([0, 0, -1])
-    # y-axis: Rx(90) sends it to z, Ry(90) sends z to x
-    assert [m[i][1] for i in range(3)] == pytest.approx([1, 0, 0])
-
-
-def test_rotation_is_orthonormal():
-    m = rot_matrix(12, -47, 133)
-    for i in range(3):
-        for j in range(3):
-            dot = sum(m[i][k] * m[j][k] for k in range(3))
-            assert dot == pytest.approx(1.0 if i == j else 0.0, abs=1e-12)
-
+    out_up = tuple(sg * vec(up)[src] for src, sg in axes)
+    out_view = tuple(sg * vec(view)[src] for src, sg in axes)
+    assert out_up == (0, 0, 1)
+    assert out_view == (0, -1, 0)
 
 def test_transform_scale_and_axes():
-    out = transform([(10, 20, 30)], 0.1, parse_axes("x,-z,y"), IDENTITY, "none")
-    assert out == [pytest.approx((1.0, -3.0, 2.0))]
+    out = transform([(0, 0, 0), (10, 20, 30)], 0.1, parse_axes("y", "z"))
+    # raw (10,20,30)*0.1 = (1,2,3) -> (x, -z, y) = (1,-3,2); the lowest point (0,0,0) is the origin
+    assert out[0] == pytest.approx((0, 0, 0))
+    assert out[1] == pytest.approx((1, -3, 2))
 
 
 def test_transform_empty():
-    assert transform([], 1.0, RAW_AXES, IDENTITY, "floor") == []
+    assert transform([], 1.0, RAW_AXES) == []
 
 
 PTS = [(0, 0, 0), (10, 4, 2), (4, 2, 8)]
 
 
-def test_center_none():
-    assert transform(PTS, 1, RAW_AXES, IDENTITY, "none") == [(0, 0, 0), (10, 4, 2), (4, 2, 8)]
-
-
-def test_center_bbox():
-    out = transform(PTS, 1, RAW_AXES, IDENTITY, "bbox")
-    assert out[0] == pytest.approx((-5, -2, -4))
-    assert out[1] == pytest.approx((5, 2, -2))
-
-
-def test_center_floor():
-    out = transform(PTS, 1, RAW_AXES, IDENTITY, "floor")
-    assert min(p[1] for p in out) == 0
-    assert (min(p[0] for p in out) + max(p[0] for p in out)) / 2 == pytest.approx(0)
-    assert (min(p[2] for p in out) + max(p[2] for p in out)) / 2 == pytest.approx(0)
-
-
-def test_center_mean():
-    out = transform(PTS, 1, RAW_AXES, IDENTITY, "mean")
-    for k in range(3):
-        assert sum(p[k] for p in out) == pytest.approx(0)
-
-
-def test_transform_applies_rotation_after_scale():
-    out = transform([(1, 0, 0)], 2.0, RAW_AXES, rot_matrix(0, 0, 90), "none")
-    assert out[0] == pytest.approx((0, 2, 0), abs=1e-12)
-    assert math.isclose(math.dist(out[0], (0, 0, 0)), 2.0)
+def test_origin_is_centre_of_lowest_slice():
+    # feet at z=0 spanning x 2..6, y 0..4; a head at z=100 far off to the side must not matter
+    pts = [(2, 0, 0), (6, 4, 0), (50, 50, 100)]
+    out = transform(pts, 1, RAW_AXES)
+    assert out[0] == pytest.approx((-2, -2, 0))
+    assert out[1] == pytest.approx((2, 2, 0))
+    assert out[2] == pytest.approx((46, 48, 100))
 
 
 # ------------------------------------------------------------------ meshing

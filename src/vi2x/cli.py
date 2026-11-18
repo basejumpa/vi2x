@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from collections.abc import Sequence
 
 from vi2x import __version__
-from vi2x.geometry import build_mesh, parse_axes, rot_matrix, transform
+from vi2x.geometry import build_mesh, parse_axes, transform
 from vi2x.readers import read_scan
 from vi2x.writers import write_glb, write_ply
 
@@ -16,7 +17,8 @@ def build_parser() -> argparse.ArgumentParser:
         prog="vi2x",
         description="Convert a Vitronic .csf or .bsf scan to a PLY or GLB point cloud or mesh.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="Order of operations: axis remap/flip -> scale -> rotation -> centering.",
+        epilog="Order of operations: axis remap -> scale -> origin at lowest centre point.\n"
+        "Output: up = +Z, view (towards the viewer) = -Y.",
     )
     ap.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     ap.add_argument("input", help="input .csf or .bsf file")
@@ -30,27 +32,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="multiplier applied to raw values (default 0.0001 = raw 0.1 mm -> metres)",
     )
     ap.add_argument(
-        "--axes",
-        default="x,-z,y",
-        help="output axes as source axes with optional sign, e.g. 'x,-z,y' "
-        "(default; makes the person stand along +Y, glTF convention). "
-        "Use 'x,y,z' to keep the raw axes.",
+        "--up",
+        default="-z",
+        metavar="AXIS",
+        help="input axis that points up: x, y or z, optionally with sign (e.g. -z). "
+        "Default -z (raw z increases towards the feet).",
     )
     ap.add_argument(
-        "--rotate",
-        default="0,0,0",
-        metavar="RX,RY,RZ",
-        help="extra rotation in degrees about the output X, Y, Z axes, applied in that "
-        "order (default 0,0,0), e.g. 0,180,0 to turn the person around",
+        "--view",
+        default="x",
+        metavar="AXIS",
+        help="input axis that points towards the viewer looking at the screen, e.g. -y. "
+        "Default x. The output always has up = +Z and view = -Y.",
     )
-    ap.add_argument(
-        "--center",
-        choices=["none", "bbox", "mean", "floor"],
-        default="floor",
-        help="translate the cloud: bbox centre, mean, or 'floor' (centre X/Z, lowest "
-        "point on the 2nd axis at 0; default)",
-    )
-    ap.add_argument("--no-center", action="store_true", help="same as --center none")
     ap.add_argument("--heads", help="only keep these head/pass ids, e.g. 0,1,2")
     ap.add_argument(
         "--merge-heads",
@@ -86,18 +80,24 @@ def _merge(meshes):
     return verts, faces
 
 
+def _join_axis_values(argv: Sequence[str] | None) -> list[str]:
+    """Let "--view -x" work: argparse would take "-x" for an option, so use "--view=-x"."""
+    args = list(sys.argv[1:] if argv is None else argv)
+    out: list[str] = []
+    for i, s in enumerate(args):
+        if i and args[i - 1] in ("--up", "--view") and s.lstrip("+-")[:1] in ("x", "y", "z"):
+            out[-1] = f"{args[i - 1]}={s}"
+        else:
+            out.append(s)
+    return out
+
+
 def main(argv: Sequence[str] | None = None) -> int:
-    a = build_parser().parse_args(argv)
+    a = build_parser().parse_args(_join_axis_values(argv))
 
     ext = a.output.lower().rsplit(".", 1)[-1]
     if ext not in ("ply", "glb"):
         raise SystemExit("output extension must be .ply or .glb")
-    try:
-        rot = [float(v) for v in a.rotate.split(",")]
-        if len(rot) != 3:
-            raise ValueError
-    except ValueError:
-        raise SystemExit("--rotate needs three numbers, e.g. 0,180,0") from None
     heads = {int(h) for h in a.heads.split(",")} if a.heads else None
 
     if a.mesh and a.stride > 1:
@@ -107,9 +107,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         pts, ws = pts[:: a.stride], ws[:: a.stride]
     if not pts:
         raise SystemExit("no points")
-    pts = transform(
-        pts, a.scale, parse_axes(a.axes), rot_matrix(*rot), "none" if a.no_center else a.center
-    )
+    pts = transform(pts, a.scale, parse_axes(a.up, a.view))
     by: dict[int, list[int]] = {}
     for i, w in enumerate(ws):
         by.setdefault(w, []).append(i)
